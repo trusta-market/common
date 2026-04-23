@@ -21,6 +21,18 @@ public class CustomException extends RuntimeException {
         this.field = errorCode.getField();
     }
 
+    // 서브클래스가 자기 status 를 강제할 때 사용하는 방어적 생성자.
+    // 예) ConflictException 이 HttpStatus.CONFLICT 를 넘겨 "Conflict 인데 응답은 404" 같은 무음 불일치를 throw 시점에 차단.
+    // expected 와 errorCode.getStatus() 가 다르면 IllegalArgumentException 으로 fail-fast.
+    public CustomException(ErrorCodeSpec errorCode, HttpStatus expected) {
+        this(errorCode);
+        if (errorCode.getStatus() != expected) {
+            throw new IllegalArgumentException(
+                    "%s 에는 status=%s 인 ErrorCode 만 허용됩니다 (실제: %s)"
+                            .formatted(expected.getReasonPhrase(), expected, errorCode.getStatus()));
+        }
+    }
+
     public CustomException(HttpStatus status, String message) {
         super(message);
         this.status = status;
