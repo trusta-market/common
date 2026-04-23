@@ -14,6 +14,6 @@ public class WebConfig implements WebMvcConfigurer {
     // 기본 Pageable 해석기보다 먼저 우리 resolver 가 동작하도록 체인 앞쪽에 추가.
     @Override
     public void addArgumentResolvers(List<HandlerMethodArgumentResolver> resolvers) {
-        resolvers.add(new RestrictedPageableResolver());
+        resolvers.add(0, new RestrictedPageableResolver());
     }
 }
