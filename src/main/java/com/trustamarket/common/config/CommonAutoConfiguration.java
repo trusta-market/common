@@ -25,6 +25,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.ApplicationEventPublisher;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.Ordered;
@@ -133,10 +134,13 @@ public class CommonAutoConfiguration {
     }
 
     // Gateway 의 X-User-* 헤더 → SecurityContext.
+    // trust-gateway-headers 프로퍼티가 명시적으로 true 일 때만 활성 (default false, header spoofing 방지).
     // 필터 내부 예외는 handlerExceptionResolver 로 위임되어 GlobalExceptionAdvice 가 처리.
     @Bean
-    public LoginFilter loginFilter(@Qualifier("handlerExceptionResolver") HandlerExceptionResolver resolver) {
-        return new LoginFilter(resolver);
+    public LoginFilter loginFilter(
+            @Qualifier("handlerExceptionResolver") HandlerExceptionResolver resolver,
+            @Value("${trusta.security.trust-gateway-headers:false}") boolean trustGatewayHeaders) {
+        return new LoginFilter(resolver, trustGatewayHeaders);
     }
 
     // 401 응답 핸들러. ErrorResponse JSON 으로 응답하므로 ObjectMapper 주입.

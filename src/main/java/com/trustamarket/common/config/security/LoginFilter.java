@@ -4,7 +4,6 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.DisabledException;
@@ -24,8 +23,9 @@ import java.util.UUID;
 // Gateway 가 주입한 X-User-* 헤더 → SecurityContext 주입.
 // UUID/Email 중 하나라도 없으면 익명 요청으로 통과. Enabled=false 면 DisabledException.
 // 필터 예외는 handlerExceptionResolver 로 위임되어 GlobalExceptionAdvice 가 ErrorResponse 로 변환.
+// trustGatewayHeaders=false (default) 이면 전체 스킵 — X-User-* 헤더를 신뢰하지 않음.
+// Gateway 가 strip+re-issue 해주는 환경에서만 true 로 명시 opt-in 해야 header spoofing 방지.
 @Slf4j
-@RequiredArgsConstructor
 public class LoginFilter extends OncePerRequestFilter {
 
     // Gateway 와의 헤더 계약. 이름 변경 시 Gateway 쪽도 동시 수정 필요.
@@ -39,11 +39,30 @@ public class LoginFilter extends OncePerRequestFilter {
     // Spring MVC 예외 해석기. 필터 예외를 @RestControllerAdvice 로 흘려보낸다.
     private final HandlerExceptionResolver resolver;
 
+    // trusta.security.trust-gateway-headers 프로퍼티. 소비 서비스가 명시 opt-in 해야 활성.
+    private final boolean trustGatewayHeaders;
+
+    public LoginFilter(HandlerExceptionResolver resolver, boolean trustGatewayHeaders) {
+        this.resolver = resolver;
+        this.trustGatewayHeaders = trustGatewayHeaders;
+        if (trustGatewayHeaders) {
+            // trust boundary 명시 — 배포/설정 실수로 Gateway 뒤가 아닌 곳에 서비스가 노출되면 spoofing 가능.
+            log.warn("[LoginFilter] Gateway 헤더 신뢰 모드 활성 — 서비스는 반드시 Gateway 뒤에만 배치되어야 하며, Gateway 가 X-User-* 를 strip+re-issue 해야 합니다.");
+        } else {
+            log.info("[LoginFilter] Gateway 헤더 신뢰 모드 비활성 — 헤더 기반 인증 스킵. 활성하려면 trusta.security.trust-gateway-headers=true 설정.");
+        }
+    }
+
     // 헤더 기반 인증 시도. 인증/검증 실패 시 체인을 끊고 예외 응답으로 종료.
     // clearContext 는 doLogin 내부에서 새 authentication 세팅 직전에만 호출 — 헤더 없으면 기존 context 존중.
+    // trustGatewayHeaders=false 면 doLogin 전체 스킵 (header spoofing 방지 — 명시 opt-in 필요).
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
+        if (!trustGatewayHeaders) {
+            filterChain.doFilter(request, response);
+            return;
+        }
         try {
             doLogin(request);
         } catch (DisabledException e) {
