@@ -7,6 +7,7 @@ import com.trustamarket.common.domain.inbox.InboxRepository;
 import com.trustamarket.common.domain.outbox.OutboxRepository;
 import com.trustamarket.common.event.Events;
 import com.trustamarket.common.event.OutboxCallback;
+import com.trustamarket.common.event.OutboxDltAckHandler;
 import com.trustamarket.common.event.OutboxEventListener;
 import com.trustamarket.common.event.OutboxRelayScheduler;
 import com.trustamarket.common.exception.GlobalExceptionAdvice;
@@ -77,14 +78,22 @@ public class CommonAutoConfiguration {
         return new Events(publisher);
     }
 
-    // Kafka 발행 성공/실패 콜백 — PROCESSED/FAILED 상태 업데이트 + DLT 전송.
+    // DLT ack 성공 시 DLT_SENT 전이 전담 — async 콜백의 self-invocation 문제 우회 위해 별도 빈.
+    @Bean
+    @ConditionalOnBean(KafkaTemplate.class)
+    public OutboxDltAckHandler outboxDltAckHandler(OutboxRepository outboxRepository) {
+        return new OutboxDltAckHandler(outboxRepository);
+    }
+
+    // Kafka 발행 성공/실패 콜백 — PROCESSED/FAILED/DLT_PENDING 상태 전이 + DLT 전송.
     // REQUIRES_NEW 트랜잭션이라 호출자 롤백에 영향받지 않는다.
     // KafkaTemplate 이 컨텍스트에 있을 때만 등록 (Kafka 미사용 서비스에서는 건너뜀).
     @Bean
     @ConditionalOnBean(KafkaTemplate.class)
     public OutboxCallback outboxCallback(OutboxRepository outboxRepository,
-                                         KafkaTemplate<String, String> kafkaTemplate) {
-        return new OutboxCallback(outboxRepository, kafkaTemplate);
+                                         KafkaTemplate<String, String> kafkaTemplate,
+                                         OutboxDltAckHandler dltAckHandler) {
+        return new OutboxCallback(outboxRepository, kafkaTemplate, dltAckHandler);
     }
 
     // OutboxEvent 수신 → Outbox 테이블 PENDING 저장 → 트랜잭션 커밋 후 Kafka 발행.
@@ -97,14 +106,15 @@ public class CommonAutoConfiguration {
         return new OutboxEventListener(outboxRepository, kafkaTemplate, jsonUtil, outboxCallback);
     }
 
-    // 10초 주기로 PENDING/FAILED 메시지를 재발행. 네트워크 장애 복구용.
-    // 엔트리별 상태 전이를 위해 OutboxCallback 을 주입받아 재사용 — DLT 로직 단일화.
+    // 10초 주기로 PENDING/FAILED 는 원 토픽, DLT_PENDING 은 DLT 토픽으로 재발행.
+    // 상태 전이는 OutboxCallback / OutboxDltAckHandler 에 위임해 REQUIRES_NEW 로 격리.
     @Bean
     @ConditionalOnBean(KafkaTemplate.class)
     public OutboxRelayScheduler outboxRelayScheduler(OutboxRepository outboxRepository,
                                                      KafkaTemplate<String, String> kafkaTemplate,
-                                                     OutboxCallback outboxCallback) {
-        return new OutboxRelayScheduler(outboxRepository, kafkaTemplate, outboxCallback);
+                                                     OutboxCallback outboxCallback,
+                                                     OutboxDltAckHandler dltAckHandler) {
+        return new OutboxRelayScheduler(outboxRepository, kafkaTemplate, outboxCallback, dltAckHandler);
     }
 
     // @IdempotentConsumer AOP. message_id 헤더로 중복 소비 방지.

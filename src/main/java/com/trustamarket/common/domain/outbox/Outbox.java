@@ -38,7 +38,7 @@ public class Outbox extends BaseEntity {
     @Column(columnDefinition = "TEXT")
     private String payload;
 
-    // PENDING / PROCESSED / FAILED.
+    // PENDING / PROCESSED / FAILED / DLT_PENDING / DLT_SENT.
     @Enumerated(EnumType.STRING)
     private OutboxStatus status;
 
@@ -68,5 +68,15 @@ public class Outbox extends BaseEntity {
     public void fail() {
         this.status = OutboxStatus.FAILED;
         this.retryCount++;
+    }
+
+    // retryCount 상한 초과 시 DLT 격리 결정. DB 에 커밋해 DLT send 실패해도 상태로 남는다.
+    public void markDltPending() {
+        this.status = OutboxStatus.DLT_PENDING;
+    }
+
+    // DLT 토픽 ack 성공 시 호출. 최종 상태 (relay 재시도 대상 제외).
+    public void markDltSent() {
+        this.status = OutboxStatus.DLT_SENT;
     }
 }
