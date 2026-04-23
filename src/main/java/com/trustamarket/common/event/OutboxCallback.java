@@ -4,12 +4,16 @@ import com.trustamarket.common.domain.outbox.Outbox;
 import com.trustamarket.common.domain.outbox.OutboxRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
+
 // Kafka 전송 결과에 따라 Outbox 상태를 전이하는 콜백.
 // REQUIRES_NEW 로 독립 트랜잭션에서 실행해 도메인 트랜잭션과 분리한다.
+// OutboxEventListener / OutboxRelayScheduler 가 공통으로 사용 — DLT 로직 단일화.
 @Slf4j
 @RequiredArgsConstructor
 public class OutboxCallback {
@@ -49,10 +53,17 @@ public class OutboxCallback {
     }
 
     // 원 토픽명 + ".DLT" 로 보내 모니터링/수동 복구 대상으로 남긴다.
+    // message_id / correlation_id 헤더를 포함해 DLT 에서도 소비자가 Inbox 멱등성 키를 찾을 수 있도록 한다.
     private void sendToDlt(Outbox outbox) {
         String dltTopic = outbox.getEventType() + ".DLT";
         try {
-            kafkaTemplate.send(dltTopic, outbox.getDomainId().toString(), outbox.getPayload())
+            // domainId 는 entity 상 nullable 가능성 있어 null 가드.
+            String key = outbox.getDomainId() != null ? outbox.getDomainId().toString() : null;
+            ProducerRecord<String, String> record = new ProducerRecord<>(dltTopic, key, outbox.getPayload());
+            record.headers().add("message_id", outbox.getId().toString().getBytes(StandardCharsets.UTF_8));
+            record.headers().add("correlation_id", outbox.getCorrelationId().getBytes(StandardCharsets.UTF_8));
+
+            kafkaTemplate.send(record)
                     .whenComplete((res, e) -> {
                         if (e != null) log.error("DLT 전송 실패: correlationId={}", outbox.getCorrelationId(), e);
                         else log.info("DLT 전송 성공: correlationId={}, topic={}", outbox.getCorrelationId(), dltTopic);

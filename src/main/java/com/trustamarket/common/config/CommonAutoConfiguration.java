@@ -98,11 +98,13 @@ public class CommonAutoConfiguration {
     }
 
     // 10초 주기로 PENDING/FAILED 메시지를 재발행. 네트워크 장애 복구용.
+    // 엔트리별 상태 전이를 위해 OutboxCallback 을 주입받아 재사용 — DLT 로직 단일화.
     @Bean
     @ConditionalOnBean(KafkaTemplate.class)
     public OutboxRelayScheduler outboxRelayScheduler(OutboxRepository outboxRepository,
-                                                     KafkaTemplate<String, String> kafkaTemplate) {
-        return new OutboxRelayScheduler(outboxRepository, kafkaTemplate);
+                                                     KafkaTemplate<String, String> kafkaTemplate,
+                                                     OutboxCallback outboxCallback) {
+        return new OutboxRelayScheduler(outboxRepository, kafkaTemplate, outboxCallback);
     }
 
     // @IdempotentConsumer AOP. message_id 헤더로 중복 소비 방지.
