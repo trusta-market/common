@@ -52,9 +52,11 @@ public class OutboxEventListener {
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void publish(OutboxEvent event) {
         outboxRepository.findByCorrelationId(event.correlationId()).ifPresent(outbox -> {
+            // domainId nullable 가드 — 파티션 키로 쓰므로 null 이면 라운드로빈 배치.
+            String key = outbox.getDomainId() != null ? outbox.getDomainId().toString() : null;
             ProducerRecord<String, String> record = new ProducerRecord<>(
                     outbox.getEventType(),
-                    outbox.getDomainId().toString(),
+                    key,
                     outbox.getPayload());
             record.headers().add("message_id", outbox.getId().toString().getBytes(StandardCharsets.UTF_8));
             record.headers().add("correlation_id", outbox.getCorrelationId().getBytes(StandardCharsets.UTF_8));
