@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.springframework.context.event.EventListener;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,15 +27,11 @@ public class OutboxEventListener {
     private final JsonUtil jsonUtil;
     private final OutboxCallback outboxCallback;
 
-    // 도메인 트랜잭션에 편승해 Outbox 행을 저장. 동일 correlationId 가 이미 있으면 idempotent 하게 skip.
+    // 도메인 트랜잭션에 편승해 Outbox 행을 저장. correlationId unique 제약에 의존해 중복 삽입을 DB 레벨에서 차단.
+    // 사전 조회 + 저장 2단계는 TOCTOU race 가 있어, saveAndFlush 후 DataIntegrityViolationException 을 catch 하는 방식으로 대체.
     @EventListener
     @Transactional(propagation = Propagation.REQUIRED)
     public void recordOutbox(OutboxEvent event) {
-        if (outboxRepository.findByCorrelationId(event.correlationId()).isPresent()) {
-            log.warn("중복 correlationId 무시: {}", event.correlationId());
-            return;
-        }
-
         Outbox outbox = Outbox.builder()
                 .correlationId(event.correlationId())
                 .domainType(event.domainType())
@@ -43,8 +40,13 @@ public class OutboxEventListener {
                 .payload(jsonUtil.toJson(event.payload()))
                 .build();
 
-        outboxRepository.save(outbox);
-        log.debug("Outbox 저장: correlationId={}, eventType={}", event.correlationId(), event.eventType());
+        try {
+            outboxRepository.saveAndFlush(outbox);
+            log.debug("Outbox 저장: correlationId={}, eventType={}", event.correlationId(), event.eventType());
+        } catch (DataIntegrityViolationException e) {
+            // 동일 correlationId 가 이미 있음 — idempotent skip.
+            log.warn("중복 correlationId 무시: {}", event.correlationId());
+        }
     }
 
     // AFTER_COMMIT 에만 Kafka 로 발행. 헤더에 message_id/correlation_id 를 심어 소비 측 Inbox 멱등성에 사용.
