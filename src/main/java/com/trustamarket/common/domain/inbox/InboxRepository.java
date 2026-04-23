@@ -11,7 +11,8 @@ import java.time.LocalDateTime;
 public interface InboxRepository extends JpaRepository<Inbox, InboxId> {
 
     // InboxCleanupScheduler 가 주기적으로 호출해 cutoff(=7일 전) 이전 레코드를 일괄 삭제한다.
-    @Modifying
+    // clearAutomatically=true — 벌크 삭제 후 1차 캐시를 비워 삭제된 엔티티가 잔존 조회되는 일 방지.
+    @Modifying(clearAutomatically = true)
     @Query("DELETE FROM Inbox i WHERE i.processedAt < :cutoff")
     int deleteByProcessedAtBefore(@Param("cutoff") LocalDateTime cutoff);
 }
