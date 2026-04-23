@@ -1,0 +1,34 @@
+package com.trustamarket.common.domain;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.MappedSuperclass;
+import lombok.Getter;
+import org.springframework.data.annotation.CreatedBy;
+import org.springframework.data.annotation.LastModifiedBy;
+
+import java.util.UUID;
+
+// 유저 감사 필드까지 포함하는 베이스 엔티티.
+// createdBy/updatedBy 는 AuditorAware 구현이 제공하는 UUID 로 자동 채움.
+@Getter
+@MappedSuperclass
+public abstract class BaseUserEntity extends BaseEntity {
+
+    // 생성한 유저 UUID. 이후 변경 불가.
+    @CreatedBy
+    @Column(updatable = false)
+    private UUID createdBy;
+
+    // 마지막 수정 유저 UUID.
+    @LastModifiedBy
+    private UUID updatedBy;
+
+    // 소프트 삭제한 유저 UUID.
+    private UUID deletedBy;
+
+    // 삭제한 주체를 함께 기록하는 소프트 삭제. BaseEntity.delete() 로 deletedAt 도 세팅.
+    public void delete(UUID userId) {
+        super.delete();
+        this.deletedBy = userId;
+    }
+}
