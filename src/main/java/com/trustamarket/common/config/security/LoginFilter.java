@@ -39,13 +39,12 @@ public class LoginFilter extends OncePerRequestFilter {
     // Spring MVC 예외 해석기. 필터 예외를 @RestControllerAdvice 로 흘려보낸다.
     private final HandlerExceptionResolver resolver;
 
-    // 매 요청마다 컨텍스트 초기화 후 헤더 기반 인증 시도.
-    // 인증/검증 실패 시 체인을 끊고 예외 응답으로 종료.
+    // 헤더 기반 인증 시도. 인증/검증 실패 시 체인을 끊고 예외 응답으로 종료.
+    // clearContext 는 doLogin 내부에서 새 authentication 세팅 직전에만 호출 — 헤더 없으면 기존 context 존중.
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
         try {
-            SecurityContextHolder.clearContext();
             doLogin(request);
         } catch (DisabledException e) {
             log.warn("[LoginFilter] 접근 제한: {}", e.getMessage());
@@ -102,6 +101,8 @@ public class LoginFilter extends OncePerRequestFilter {
             Authentication authentication = new UsernamePasswordAuthenticationToken(
                     userDetails, null, userDetails.getAuthorities());
 
+            // 새 인증 세팅 직전에만 기존 context 를 비운다 — 다른 인증 필터와 공존 가능하도록.
+            SecurityContextHolder.clearContext();
             SecurityContextHolder.getContext().setAuthentication(authentication);
         } catch (IllegalArgumentException e) {
             // UUID.fromString 실패 등.
