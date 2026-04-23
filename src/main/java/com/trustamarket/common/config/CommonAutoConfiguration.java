@@ -19,6 +19,8 @@ import com.trustamarket.common.messaging.InboxCleanupScheduler;
 import com.trustamarket.common.response.CommonResponseAdvice;
 import com.trustamarket.common.util.JsonUtil;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.ApplicationEventPublisher;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -45,13 +47,17 @@ import org.springframework.web.servlet.HandlerExceptionResolver;
 public class CommonAutoConfiguration {
 
     // 전역 예외 핸들러. 모든 예외를 RFC 9457 ErrorResponse 로 변환.
+    // 소비 서비스가 자체 advice 를 등록하면 그쪽이 우선.
     @Bean
+    @ConditionalOnMissingBean
     public GlobalExceptionAdvice globalExceptionAdvice() {
         return new GlobalExceptionAdvice();
     }
 
     // 컨트롤러 반환값을 CommonResponse / PagedResponse 로 자동 래핑.
+    // 소비 서비스가 자체 advice 를 등록하면 그쪽이 우선.
     @Bean
+    @ConditionalOnMissingBean
     public CommonResponseAdvice commonResponseAdvice() {
         return new CommonResponseAdvice();
     }
@@ -73,7 +79,9 @@ public class CommonAutoConfiguration {
 
     // Kafka 발행 성공/실패 콜백 — PROCESSED/FAILED 상태 업데이트 + DLT 전송.
     // REQUIRES_NEW 트랜잭션이라 호출자 롤백에 영향받지 않는다.
+    // KafkaTemplate 이 컨텍스트에 있을 때만 등록 (Kafka 미사용 서비스에서는 건너뜀).
     @Bean
+    @ConditionalOnBean(KafkaTemplate.class)
     public OutboxCallback outboxCallback(OutboxRepository outboxRepository,
                                          KafkaTemplate<String, String> kafkaTemplate) {
         return new OutboxCallback(outboxRepository, kafkaTemplate);
@@ -81,6 +89,7 @@ public class CommonAutoConfiguration {
 
     // OutboxEvent 수신 → Outbox 테이블 PENDING 저장 → 트랜잭션 커밋 후 Kafka 발행.
     @Bean
+    @ConditionalOnBean(KafkaTemplate.class)
     public OutboxEventListener outboxEventListener(OutboxRepository outboxRepository,
                                                    KafkaTemplate<String, String> kafkaTemplate,
                                                    JsonUtil jsonUtil,
@@ -90,19 +99,23 @@ public class CommonAutoConfiguration {
 
     // 10초 주기로 PENDING/FAILED 메시지를 재발행. 네트워크 장애 복구용.
     @Bean
+    @ConditionalOnBean(KafkaTemplate.class)
     public OutboxRelayScheduler outboxRelayScheduler(OutboxRepository outboxRepository,
                                                      KafkaTemplate<String, String> kafkaTemplate) {
         return new OutboxRelayScheduler(outboxRepository, kafkaTemplate);
     }
 
     // @IdempotentConsumer AOP. message_id 헤더로 중복 소비 방지.
+    // InboxRepository (JPA) 가 있을 때만 등록.
     @Bean
+    @ConditionalOnBean(InboxRepository.class)
     public InboxAdvice inboxAdvice(InboxRepository inboxRepository) {
         return new InboxAdvice(inboxRepository);
     }
 
     // 매일 03:00 에 7일 이전 Inbox 삭제. 테이블 비대화 방지.
     @Bean
+    @ConditionalOnBean(InboxRepository.class)
     public InboxCleanupScheduler inboxCleanupScheduler(InboxRepository inboxRepository) {
         return new InboxCleanupScheduler(inboxRepository);
     }
