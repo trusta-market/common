@@ -27,7 +27,11 @@ public abstract class BaseUserEntity extends BaseEntity {
     private UUID deletedBy;
 
     // 삭제한 주체를 함께 기록하는 소프트 삭제. BaseEntity.delete() 로 deletedAt 도 세팅.
+    // 이미 삭제된 엔티티면 최초 삭제자/시각을 그대로 보존 (idempotent).
     public void delete(UUID userId) {
+        if (isDeleted()) {
+            return;
+        }
         super.delete();
         this.deletedBy = userId;
     }

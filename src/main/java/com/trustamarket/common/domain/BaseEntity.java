@@ -30,8 +30,11 @@ public abstract class BaseEntity {
     private LocalDateTime deletedAt;
 
     // 소프트 삭제: 실제 row 는 남기고 deletedAt 만 세팅.
+    // 이미 삭제된 엔티티에 재호출돼도 최초 삭제 시각을 보존 (idempotent).
     public void delete() {
-        this.deletedAt = LocalDateTime.now();
+        if (this.deletedAt == null) {
+            this.deletedAt = LocalDateTime.now();
+        }
     }
 
     // 삭제 여부 플래그.
