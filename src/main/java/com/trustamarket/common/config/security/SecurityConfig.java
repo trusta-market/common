@@ -31,8 +31,11 @@ public class SecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(c -> c.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .addFilterBefore(loginFilter, UsernamePasswordAuthenticationFilter.class)
+                // deny by default — actuator health/info 외 모든 요청은 인증 필수.
+                // 소비 서비스의 public 엔드포인트(/signup, /login 등)는 각자 SecurityConfig 에서 override.
                 .authorizeHttpRequests(authorize -> authorize
-                        .anyRequest().permitAll()
+                        .requestMatchers("/actuator/health", "/actuator/info").permitAll()
+                        .anyRequest().authenticated()
                 )
                 .exceptionHandling(c -> {
                     c.authenticationEntryPoint(authenticationEntryPoint);
