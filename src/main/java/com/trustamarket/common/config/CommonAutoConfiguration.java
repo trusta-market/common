@@ -81,7 +81,7 @@ public class CommonAutoConfiguration {
 
     // DLT ack 성공 시 DLT_SENT 전이 전담 — async 콜백의 self-invocation 문제 우회 위해 별도 빈.
     @Bean
-    @ConditionalOnBean(KafkaTemplate.class)
+    @ConditionalOnBean({KafkaTemplate.class, OutboxRepository.class})
     public OutboxDltAckHandler outboxDltAckHandler(OutboxRepository outboxRepository) {
         return new OutboxDltAckHandler(outboxRepository);
     }
@@ -90,7 +90,7 @@ public class CommonAutoConfiguration {
     // REQUIRES_NEW 트랜잭션이라 호출자 롤백에 영향받지 않는다.
     // KafkaTemplate 이 컨텍스트에 있을 때만 등록 (Kafka 미사용 서비스에서는 건너뜀).
     @Bean
-    @ConditionalOnBean(KafkaTemplate.class)
+    @ConditionalOnBean({KafkaTemplate.class, OutboxRepository.class})
     public OutboxCallback outboxCallback(OutboxRepository outboxRepository,
                                          KafkaTemplate<String, String> kafkaTemplate,
                                          OutboxDltAckHandler dltAckHandler) {
@@ -99,7 +99,7 @@ public class CommonAutoConfiguration {
 
     // OutboxEvent 수신 → Outbox 테이블 PENDING 저장 → 트랜잭션 커밋 후 Kafka 발행.
     @Bean
-    @ConditionalOnBean(KafkaTemplate.class)
+    @ConditionalOnBean({KafkaTemplate.class, OutboxRepository.class})
     public OutboxEventListener outboxEventListener(OutboxRepository outboxRepository,
                                                    KafkaTemplate<String, String> kafkaTemplate,
                                                    JsonUtil jsonUtil,
@@ -110,7 +110,7 @@ public class CommonAutoConfiguration {
     // 10초 주기로 PENDING/FAILED 는 원 토픽, DLT_PENDING 은 DLT 토픽으로 재발행.
     // 상태 전이는 OutboxCallback / OutboxDltAckHandler 에 위임해 REQUIRES_NEW 로 격리.
     @Bean
-    @ConditionalOnBean(KafkaTemplate.class)
+    @ConditionalOnBean({KafkaTemplate.class, OutboxRepository.class})
     public OutboxRelayScheduler outboxRelayScheduler(OutboxRepository outboxRepository,
                                                      KafkaTemplate<String, String> kafkaTemplate,
                                                      OutboxCallback outboxCallback,
