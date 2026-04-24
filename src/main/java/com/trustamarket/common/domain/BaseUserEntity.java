@@ -38,4 +38,12 @@ public abstract class BaseUserEntity extends BaseEntity {
         super.delete();
         this.deletedBy = userId;
     }
+
+    // 부모 no-arg delete() 를 오버라이드해 호출 차단 — actor-aware 삭제 정책 강제.
+    // BaseUserEntity 에선 반드시 delete(UUID) 를 사용해야 deletedBy 가 함께 기록된다.
+    @Override
+    public void delete() {
+        throw new UnsupportedOperationException(
+                "BaseUserEntity 는 delete(UUID userId) 를 사용하세요. 감사 이력 기록을 위해 삭제자 UUID 필수.");
+    }
 }
