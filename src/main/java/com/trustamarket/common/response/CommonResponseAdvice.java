@@ -8,10 +8,12 @@ import org.springframework.http.server.ServerHttpRequest;
 import org.springframework.http.server.ServerHttpResponse;
 import org.springframework.http.server.ServletServerHttpResponse;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Slice;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyAdvice;
 
-// 컨트롤러 반환값을 CommonResponse / PagedResponse 로 자동 래핑하는 Advice.
-// String 반환은 제외(컨버터 이슈), 이미 래핑된 응답은 통과, Page<?> 는 PagedResponse 로 전환, 그 외는 CommonResponse 로 감싼다.
+// 컨트롤러 반환값을 CommonResponse / PagedResponse / SlicedResponse 로 자동 래핑하는 Advice.
+// String 반환은 제외(컨버터 이슈), 이미 래핑된 응답은 통과.
+// Page<?> → PagedResponse, Slice<?> (Page 아닌) → SlicedResponse, 그 외 → CommonResponse.
 public class CommonResponseAdvice implements ResponseBodyAdvice<Object> {
 
     @Override
@@ -20,6 +22,7 @@ public class CommonResponseAdvice implements ResponseBodyAdvice<Object> {
         return !paramType.equals(String.class)
                 && !paramType.equals(CommonResponse.class)
                 && !paramType.equals(PagedResponse.class)
+                && !paramType.equals(SlicedResponse.class)
                 && !paramType.equals(ErrorResponse.class);
     }
 
@@ -27,14 +30,21 @@ public class CommonResponseAdvice implements ResponseBodyAdvice<Object> {
     public Object beforeBodyWrite(Object body, MethodParameter returnType, MediaType selectedContentType,
                                   Class<? extends HttpMessageConverter<?>> selectedConverterType,
                                   ServerHttpRequest request, ServerHttpResponse response) {
-        if (body instanceof CommonResponse || body instanceof PagedResponse || body instanceof ErrorResponse) {
+        if (body instanceof CommonResponse
+                || body instanceof PagedResponse
+                || body instanceof SlicedResponse
+                || body instanceof ErrorResponse) {
             return body;
         }
 
         int status = resolveStatus(response);
 
+        // Page 는 Slice 의 서브타입이라 Page 체크가 먼저 와야 한다.
         if (body instanceof Page<?> page) {
             return wrapPage(status, page);
+        }
+        if (body instanceof Slice<?> slice) {
+            return wrapSlice(status, slice);
         }
         return CommonResponse.of(status, body);
     }
@@ -51,5 +61,10 @@ public class CommonResponseAdvice implements ResponseBodyAdvice<Object> {
     @SuppressWarnings({"unchecked", "rawtypes"})
     private PagedResponse<?> wrapPage(int status, Page<?> page) {
         return PagedResponse.of(status, (Page) page);
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private SlicedResponse<?> wrapSlice(int status, Slice<?> slice) {
+        return SlicedResponse.of(status, (Slice) slice);
     }
 }
