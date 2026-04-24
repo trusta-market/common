@@ -68,8 +68,10 @@ com.trustamarket.common
 │   ├── CommonResponse.java                   # record. { status, data } — 단일/일반 응답
 │   ├── PagedResponse.java                    # record. { status, data, pageInfo } — 페이지 응답
 │   ├── PageInfo.java                         # record + @Builder. Page 메타 요약
+│   ├── SlicedResponse.java                   # record. { status, data, sliceInfo } — 슬라이스 응답
+│   ├── SliceInfo.java                        # record + @Builder. Slice 메타 (COUNT 쿼리 없음)
 │   ├── ErrorResponse.java                    # record. RFC 9457 엄격 (type/title/status/detail/instance)
-│   └── CommonResponseAdvice.java             # 컨트롤러 반환값 자동 래핑. Page<?> 자동 감지
+│   └── CommonResponseAdvice.java             # 컨트롤러 반환값 자동 래핑. Page / Slice 자동 감지
 │
 ├── exception/                                # 전역 예외 계층
 │   ├── CustomException.java                  # 공통 베이스. type/status/field 필드
@@ -383,7 +385,7 @@ trusta:
 
 ### 성공 응답 — 타입 분리
 
-단일/일반 응답은 `CommonResponse`, 페이지 응답은 `PagedResponse` 를 사용한다. 타입 시그니처만 봐도 응답 유형이 드러나도록 의도적으로 분리.
+단일/일반은 `CommonResponse`, 페이지는 `PagedResponse`, 슬라이스는 `SlicedResponse` 를 사용한다. 타입 시그니처만 봐도 응답 유형이 드러나도록 의도적으로 분리.
 
 ```java
 // 단일 조회 — Advice 가 CommonResponse 로 자동 래핑
@@ -392,16 +394,25 @@ public OrderResponse get(@PathVariable UUID id) {
     return orderService.get(id);
 }
 
-// 페이지 조회 — Page<?> 반환을 Advice 가 감지해 PagedResponse 로 자동 래핑
+// 페이지 조회 — Page<?> 반환을 Advice 가 감지해 PagedResponse 로 자동 래핑 (COUNT 쿼리 포함)
 @GetMapping
 public Page<OrderResponse> list(Pageable pageable) {
     return orderService.search(pageable);
 }
 
+// 슬라이스 조회 — Slice<?> 반환을 Advice 가 감지해 SlicedResponse 로 자동 래핑 (COUNT 쿼리 없음)
+@GetMapping("/feed")
+public Slice<OrderResponse> feed(Pageable pageable) {
+    return orderService.feed(pageable);
+}
+
 // 명시적 사용
 return CommonResponse.of(200, orderResponse);
 return PagedResponse.of(200, orderPage);
+return SlicedResponse.of(200, orderSlice);
 ```
+
+> `Page<T> extends Slice<T>` 이라 Page 반환도 기술적으론 Slice 이지만, `CommonResponseAdvice` 가 Page 를 먼저 체크해 `PagedResponse` 로 래핑한다.
 
 **단일 응답 JSON** — `{ status, data }`:
 ```json
@@ -411,7 +422,7 @@ return PagedResponse.of(200, orderPage);
 }
 ```
 
-**페이지 응답 JSON** — `{ status, data, pageInfo }`:
+**페이지 응답 JSON** — `{ status, data, pageInfo }` (COUNT 쿼리 포함, 전체 개수/페이지 수 제공):
 ```json
 {
   "status": 200,
@@ -422,6 +433,24 @@ return PagedResponse.of(200, orderPage);
   }
 }
 ```
+
+**슬라이스 응답 JSON** — `{ status, data, sliceInfo }` (COUNT 쿼리 없음):
+```json
+{
+  "status": 200,
+  "data": [ { "id": "...", "orderNumber": "ORD-2026-0001" } ],
+  "sliceInfo": {
+    "page": 0, "size": 10,
+    "first": true, "last": false, "hasNext": true
+  }
+}
+```
+
+| 선택 기준 | `Page` / `PagedResponse` | `Slice` / `SlicedResponse` |
+|---|---|---|
+| 쿼리 비용 | COUNT 추가 발생 | COUNT 없음 (가벼움) |
+| 메타 | totalElements, totalPages | hasNext 만 |
+| UX | 페이지 번호 표시 (1, 2, 3, 마지막) | 스크롤 / 더보기 |
 
 ### 실패 응답 — `ErrorResponse` (RFC 9457 엄격 준수)
 
