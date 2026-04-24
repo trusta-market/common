@@ -17,12 +17,16 @@ public class OutboxDltAckHandler {
     private final OutboxRepository outboxRepository;
 
     // DLT 토픽 발행이 ack 된 후 호출되어 최종 상태 DLT_SENT 로 전이.
+    // 해당 correlationId 의 Outbox 가 없으면 warn 로그 — 운영 관찰성을 위해 조용히 skip 하지 않는다.
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void markDltSent(String correlationId) {
-        outboxRepository.findByCorrelationId(correlationId).ifPresent(outbox -> {
-            outbox.markDltSent();
-            outboxRepository.save(outbox);
-            log.info("DLT ack 확정 → DLT_SENT: correlationId={}", correlationId);
-        });
+        outboxRepository.findByCorrelationId(correlationId).ifPresentOrElse(
+                outbox -> {
+                    outbox.markDltSent();
+                    outboxRepository.save(outbox);
+                    log.info("DLT ack 확정 → DLT_SENT: correlationId={}", correlationId);
+                },
+                () -> log.warn("DLT ack 수신했지만 Outbox 없음 (cleanup 후 도착? 운영 확인 필요): correlationId={}", correlationId)
+        );
     }
 }
