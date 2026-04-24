@@ -44,14 +44,23 @@ public class CommonResponseAdvice implements ResponseBodyAdvice<Object> {
     public Object beforeBodyWrite(Object body, MethodParameter returnType, MediaType selectedContentType,
                                   Class<? extends HttpMessageConverter<?>> selectedConverterType,
                                   ServerHttpRequest request, ServerHttpResponse response) {
+        // null body 는 래핑 금지 — HTTP 204/304 zero-byte 응답 계약을 깨지 않도록.
+        if (body == null) {
+            return null;
+        }
+
+        int status = resolveStatus(response);
+        // 204 No Content / 304 Not Modified 은 본문이 없어야 하므로 래핑하지 않고 통과.
+        if (status == HttpStatus.NO_CONTENT.value() || status == HttpStatus.NOT_MODIFIED.value()) {
+            return body;
+        }
+
         if (body instanceof CommonResponse
                 || body instanceof PagedResponse
                 || body instanceof SlicedResponse
                 || body instanceof ErrorResponse) {
             return body;
         }
-
-        int status = resolveStatus(response);
 
         // Page 는 Slice 의 서브타입이라 Page 체크가 먼저 와야 한다.
         if (body instanceof Page<?> page) {

@@ -444,7 +444,7 @@ trusta:
 | JPA Auditing + QueryDSL | `createdAt`/`updatedAt` 자동 채움, `JPAQueryFactory` 빈, `EntityScan("com.trustamarket")` |
 | ObjectMapper + JsonUtil | JavaTimeModule, ISO 8601 |
 | 전역 예외 처리 | 모든 예외를 **RFC 9457** `ErrorResponse` 로 변환 |
-| 응답 자동 래핑 | 컨트롤러 반환값을 `CommonResponse` / `PagedResponse` 로 래핑 (Page 자동 감지) |
+| 응답 자동 래핑 | 컨트롤러 반환값을 `CommonResponse` / `PagedResponse` / `SlicedResponse` 로 래핑. null / 204 / 304 는 통과 |
 | MDC 트레이싱 | `X-Trace-Id` 자동 생성/전파 (정규식 검증), `@Async` 에도 유지 |
 | Feign 헤더 전파 | 서비스 간 호출 시 `Authorization` / `X-User-*` / `X-Trace-Id` 전파 |
 | 비동기 쓰레드풀 | `@Async` 용 (core:10, max:50), `trusta-async-*` prefix |
