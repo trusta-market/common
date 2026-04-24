@@ -8,6 +8,8 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.nio.charset.StandardCharsets;
 
@@ -44,12 +46,19 @@ public class OutboxCallback {
             outboxRepository.saveAndFlush(outbox);
 
             if (outbox.getRetryCount() >= MAX_RETRY_COUNT) {
-                // DLT send 전에 상태를 먼저 커밋 — Kafka ack 실패해도 DLT_PENDING 으로 남아 재시도 가능.
+                // DLT_PENDING 으로 마킹 — onFailure 트랜잭션이 commit 될 때 DB 에 반영된다.
                 outbox.markDltPending();
                 outboxRepository.saveAndFlush(outbox);
-                log.error("최대 재시도 횟수 초과({}회). DLT 격리 시작: correlationId={}",
+                log.error("최대 재시도 횟수 초과({}회). DLT 격리 예약: correlationId={}",
                         outbox.getRetryCount(), correlationId);
-                sendToDlt(outbox);
+                // sendToDlt 를 AFTER_COMMIT 에 실행 — 현재 tx 가 commit 된 후에만 async send 가 시작되므로
+                // DLT ack 콜백(markDltSent)이 DLT_PENDING 커밋보다 먼저 실행되는 race 가 원천 차단된다.
+                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        sendToDlt(outbox);
+                    }
+                });
             } else {
                 log.warn("Kafka 발행 실패 (재시도 예정 {}/{}): correlationId={}, error={}",
                         outbox.getRetryCount(), MAX_RETRY_COUNT, correlationId, ex.getMessage());
