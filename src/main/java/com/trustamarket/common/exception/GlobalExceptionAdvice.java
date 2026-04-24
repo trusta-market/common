@@ -9,6 +9,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
+import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -37,13 +38,16 @@ public class GlobalExceptionAdvice {
         return ResponseEntity.status(e.getStatus()).body(body);
     }
 
-    // @Valid 실패 — 복수 필드 에러를 detail 한 줄에 요약 (RFC 9457 extension 금지 원칙).
+    // @Valid 실패 — 복수 에러를 detail 한 줄에 요약 (RFC 9457 extension 금지 원칙).
+    // getAllErrors 로 필드 에러(FieldError) + class-level 에러(ObjectError) 모두 포함.
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ErrorResponse> handleValidation(MethodArgumentNotValidException e, HttpServletRequest request) {
         log.warn("[{}] Validation Error", request.getRequestURI());
 
-        String detail = e.getBindingResult().getFieldErrors().stream()
-            .map(fe -> "%s: %s".formatted(fe.getField(), fe.getDefaultMessage()))
+        String detail = e.getBindingResult().getAllErrors().stream()
+            .map(err -> err instanceof FieldError fe
+                ? "%s: %s".formatted(fe.getField(), fe.getDefaultMessage())
+                : "%s: %s".formatted(err.getObjectName(), err.getDefaultMessage()))
             .collect(Collectors.joining("; "));
 
         ErrorResponse body = ErrorResponse.of(
