@@ -85,8 +85,10 @@ com.trustamarket.common
 │   └── GlobalExceptionAdvice.java            # 모든 예외 → ErrorResponse (RFC 9457)
 │
 ├── domain/                                   # JPA 공통 엔티티 (Outbox/Inbox 는 도메인에서 직접)
-│   ├── BaseEntity.java                       # createdAt / updatedAt / deletedAt + idempotent soft delete
-│   └── BaseUserEntity.java                   # + createdBy / updatedBy / deletedBy (UUID), idempotent delete
+│   ├── BaseCreatedEntity.java                # createdAt 만 — append-only (이력/이벤트/트랜잭션 로그)
+│   ├── BaseTimeEntity.java                   # + updatedAt — soft delete 없음 (wallet, config, 상태 관리)
+│   ├── BaseEntity.java                       # + deletedAt — 표준 soft delete
+│   └── BaseUserEntity.java                   # + createdBy / updatedBy / deletedBy — 유저 감사까지
 │
 ├── event/                                    # 이벤트 경량 계약 (구현체는 도메인)
 │   ├── OutboxEvent.java                      # record. 이벤트 envelope — correlationId / domainType / domainId / eventType / payload
@@ -546,7 +548,52 @@ throw new ForbiddenException();
 
 ## 공통 엔티티
 
-### `BaseEntity` — 기본 감사 필드
+4단계 선형 체인 — 엔티티 라이프사이클에 맞춰 골라 상속:
+
+```text
+BaseCreatedEntity   (createdAt)
+    ↑
+BaseTimeEntity      (+ updatedAt)
+    ↑
+BaseEntity          (+ deletedAt + soft delete)
+    ↑
+BaseUserEntity      (+ createdBy / updatedBy / deletedBy)
+```
+
+### 선택 가이드
+
+| 베이스 | 대상 | 예시 |
+|---|---|---|
+| `BaseCreatedEntity` | **append-only** — 생성 후 수정/삭제 불가 | 이력 테이블 (status_history, order_event_log), 트랜잭션 로그 (p_point_transactions), 이벤트 inbox/outbox, tracking |
+| `BaseTimeEntity` | 수정은 가능하지만 **soft delete 불필요** — status 로 라이프사이클 관리 | p_wallets (ACTIVE/FROZEN/CLOSED), trust_score, config, delivery, inspection_centers |
+| `BaseEntity` | 표준 엔티티 — 생성/수정/소프트 삭제. user 감사 불필요 | (유저 감사 없이도 되는 일반 엔티티) |
+| `BaseUserEntity` | + **누가** 만들고 수정하고 삭제했는지 감사 필요 | User, Order, Product, Payment, Refund 등 주요 도메인 엔티티 |
+
+### `BaseCreatedEntity` — append-only
+
+```java
+@Entity
+@Table(name = "order_event_log")
+public class OrderEventLog extends BaseCreatedEntity {
+    @Id @GeneratedValue(strategy = GenerationType.UUID)
+    private UUID eventId;
+    // createdAt 만 상속. update 하면 안 되는 테이블에 사용
+}
+```
+
+### `BaseTimeEntity` — soft delete 없는 수정 가능 엔티티
+
+```java
+@Entity
+@Table(name = "p_wallets")
+public class Wallet extends BaseTimeEntity {
+    @Id @GeneratedValue(strategy = GenerationType.UUID)
+    private UUID walletId;
+    private WalletStatus status;  // ACTIVE → FROZEN → CLOSED 로 status 로 라이프사이클 관리
+}
+```
+
+### `BaseEntity` — 표준 soft delete
 
 ```java
 @Entity
@@ -554,21 +601,19 @@ throw new ForbiddenException();
 public class Product extends BaseEntity {
     @Id @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
-    private String name;
-    private int price;
 }
 ```
-
-| 필드 | 타입 | 설명 |
-|---|---|---|
-| `createdAt` | `LocalDateTime` | 생성 시각 (자동, 수정 불가) |
-| `updatedAt` | `LocalDateTime` | 수정 시각 (자동) |
-| `deletedAt` | `LocalDateTime` | 삭제 시각 (null 이면 미삭제) |
 
 ```java
 product.delete();     // 멱등 — 이미 deletedAt 있으면 덮어쓰지 않음 (최초 삭제 시각 보존)
 product.isDeleted();
 ```
+
+| 필드 | 타입 | 설명 |
+|---|---|---|
+| `createdAt` | `LocalDateTime` | 생성 시각 (자동, 수정 불가). `BaseCreatedEntity` 에서 상속 |
+| `updatedAt` | `LocalDateTime` | 수정 시각 (자동). `BaseTimeEntity` 에서 상속 |
+| `deletedAt` | `LocalDateTime` | 삭제 시각 (null 이면 미삭제) |
 
 ### `BaseUserEntity` — 유저 감사 확장
 
