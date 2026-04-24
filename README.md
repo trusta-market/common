@@ -355,16 +355,89 @@ trusta:
   security:
     # Gateway 뒤 배치된 서비스에서만 true. false(default) 면 LoginFilter 비활성 → 인증 필요한 엔드포인트는 401.
     trust-gateway-headers: true
+  messaging:
+    outbox:
+      enabled: true    # Kafka 이벤트 발행 (Outbox 패턴) 이 필요한 서비스만 true. default false
+    inbox:
+      enabled: true    # Kafka 멱등 소비 (@IdempotentConsumer) 가 필요한 서비스만 true. default false
+```
+
+### Trusta 프로퍼티 요약
+
+| 프로퍼티 | 기본값 | 효과 |
+|---|---|---|
+| `trusta.security.trust-gateway-headers` | `false` | `true` 일 때만 `LoginFilter` 가 `X-User-*` 헤더로 SecurityContext 주입 |
+| `trusta.messaging.outbox.enabled` | `false` | `true` 일 때만 `OutboxEventListener` / `OutboxCallback` / `OutboxRelayScheduler` / `OutboxDltAckHandler` 등록. Kafka + JPA 의존성도 있어야 활성 |
+| `trusta.messaging.inbox.enabled` | `false` | `true` 일 때만 `InboxAdvice` (`@IdempotentConsumer` AOP) / `InboxCleanupScheduler` 등록. JPA 의존성도 있어야 활성 |
+
+### 설정 시나리오별 `application.yaml`
+
+도메인 서비스 유형에 따라 필요한 만큼만 켠다. **아무 것도 안 쓰면 common 의존성만 추가하고 아래 블록 전체 생략 가능** (default 가 모두 false).
+
+#### 1) Gateway 뒤 단순 REST 서비스 (인증만 필요)
+```yaml
+trusta:
+  security:
+    trust-gateway-headers: true
+```
+
+#### 2) 이벤트 발행하는 서비스 (Outbox 만)
+```yaml
+trusta:
+  security:
+    trust-gateway-headers: true
+  messaging:
+    outbox:
+      enabled: true
+```
+
+#### 3) 이벤트 소비하는 서비스 (Inbox 만)
+```yaml
+trusta:
+  security:
+    trust-gateway-headers: true
+  messaging:
+    inbox:
+      enabled: true
+```
+
+#### 4) 이벤트 발행 + 소비 모두 (SAGA / 양방향 이벤트)
+```yaml
+trusta:
+  security:
+    trust-gateway-headers: true
+  messaging:
+    outbox:
+      enabled: true
+    inbox:
+      enabled: true
+```
+
+#### 5) Gateway / Config Server 등 DB·Kafka 없는 서비스
+```yaml
+# 별도 trusta 블록 필요 없음. LoginFilter 도 비활성 유지 (기본값).
+# Security 필요하면 trust-gateway-headers 만 켜면 됨.
+```
+
+#### 6) 명시적 opt-out (빈이 classpath 에 있어도 로드 안 하고 싶을 때)
+```yaml
+trusta:
+  messaging:
+    outbox:
+      enabled: false   # default 와 동일하지만 명시적으로 끌 때
+    inbox:
+      enabled: false
 ```
 
 ---
 
 ## 자동 등록되는 기능
 
-소비 서비스의 환경에 따라 **조건부로 등록**된다 (`@ConditionalOnBean` / `@ConditionalOnMissingBean`):
-- Kafka 의존 빈 (Outbox 관련) — `KafkaTemplate` 있는 경우만
-- JPA 의존 빈 (Inbox 관련) — `InboxRepository` 있는 경우만
-- Advice 빈 — 소비자가 자체 advice 등록 시 자동 양보
+소비 서비스의 환경 + 명시적 opt-in 에 따라 **조건부로 등록**된다:
+- **Outbox 계열** (Kafka 발행, DLT, relay 스케줄러) — `trusta.messaging.outbox.enabled=true` + Kafka/JPA 의존성
+- **Inbox 계열** (`@IdempotentConsumer` AOP, cleanup 스케줄러) — `trusta.messaging.inbox.enabled=true` + JPA 의존성
+- **Advice / Security 빈** — 소비자가 자체 빈 등록 시 자동 양보 (`@ConditionalOnMissingBean`)
+- **LoginFilter** — `trusta.security.trust-gateway-headers=true` 일 때만 실제 인증 로직 활성
 
 | 기능 | 설명 |
 |---|---|
@@ -609,6 +682,8 @@ order.delete(currentUserId);  // 멱등 — 이미 삭제된 엔티티면 no-op 
 
 ## Outbox 패턴 — Kafka 이벤트 발행
 
+> ⚠️ **opt-in** — 기본 비활성. `application.yaml` 에 `trusta.messaging.outbox.enabled: true` 명시 + Kafka/JPA 의존성 필요.
+
 트랜잭션 커밋 후 Kafka 로 이벤트를 안전하게 발행. DLT 격리까지 **DB 상태 머신**으로 추적해 메시지 손실 방지.
 
 ### 상태 머신
@@ -702,6 +777,8 @@ Events.trigger(OutboxEvent.withCorrelation(
 ---
 
 ## Inbox 패턴 — Kafka 멱등성 소비
+
+> ⚠️ **opt-in** — 기본 비활성. `application.yaml` 에 `trusta.messaging.inbox.enabled: true` 명시 + JPA 의존성 필요.
 
 Kafka 메시지 중복 소비 방지. **`(messageId, messageGroup)` 복합 PK** 로 **컨슈머 그룹별 독립 멱등성** 보장.
 같은 `message_id` 라도 다른 컨슈머 그룹이면 각 그룹이 한 번씩 독립 처리된다.
