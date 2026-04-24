@@ -22,6 +22,7 @@ import com.trustamarket.common.util.JsonUtil;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.ApplicationEventPublisher;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -79,8 +80,12 @@ public class CommonAutoConfiguration {
         return new Events(publisher);
     }
 
+    // ─── Outbox 계열 (trusta.messaging.outbox.enabled=true 일 때만 활성, default false) ───
+    // Kafka + JPA 의존성도 있어야 활성 (@ConditionalOnBean). 프로젝트에서 Outbox 패턴을 실제 쓰는 서비스만 명시적으로 켠다.
+
     // DLT ack 성공 시 DLT_SENT 전이 전담 — async 콜백의 self-invocation 문제 우회 위해 별도 빈.
     @Bean
+    @ConditionalOnProperty(name = "trusta.messaging.outbox.enabled", havingValue = "true")
     @ConditionalOnBean({KafkaTemplate.class, OutboxRepository.class})
     public OutboxDltAckHandler outboxDltAckHandler(OutboxRepository outboxRepository) {
         return new OutboxDltAckHandler(outboxRepository);
@@ -88,8 +93,8 @@ public class CommonAutoConfiguration {
 
     // Kafka 발행 성공/실패 콜백 — PROCESSED/FAILED/DLT_PENDING 상태 전이 + DLT 전송.
     // REQUIRES_NEW 트랜잭션이라 호출자 롤백에 영향받지 않는다.
-    // KafkaTemplate 이 컨텍스트에 있을 때만 등록 (Kafka 미사용 서비스에서는 건너뜀).
     @Bean
+    @ConditionalOnProperty(name = "trusta.messaging.outbox.enabled", havingValue = "true")
     @ConditionalOnBean({KafkaTemplate.class, OutboxRepository.class})
     public OutboxCallback outboxCallback(OutboxRepository outboxRepository,
                                          KafkaTemplate<String, String> kafkaTemplate,
@@ -99,6 +104,7 @@ public class CommonAutoConfiguration {
 
     // OutboxEvent 수신 → Outbox 테이블 PENDING 저장 → 트랜잭션 커밋 후 Kafka 발행.
     @Bean
+    @ConditionalOnProperty(name = "trusta.messaging.outbox.enabled", havingValue = "true")
     @ConditionalOnBean({KafkaTemplate.class, OutboxRepository.class})
     public OutboxEventListener outboxEventListener(OutboxRepository outboxRepository,
                                                    KafkaTemplate<String, String> kafkaTemplate,
@@ -110,6 +116,7 @@ public class CommonAutoConfiguration {
     // 10초 주기로 PENDING/FAILED 는 원 토픽, DLT_PENDING 은 DLT 토픽으로 재발행.
     // 상태 전이는 OutboxCallback / OutboxDltAckHandler 에 위임해 REQUIRES_NEW 로 격리.
     @Bean
+    @ConditionalOnProperty(name = "trusta.messaging.outbox.enabled", havingValue = "true")
     @ConditionalOnBean({KafkaTemplate.class, OutboxRepository.class})
     public OutboxRelayScheduler outboxRelayScheduler(OutboxRepository outboxRepository,
                                                      KafkaTemplate<String, String> kafkaTemplate,
@@ -118,25 +125,33 @@ public class CommonAutoConfiguration {
         return new OutboxRelayScheduler(outboxRepository, kafkaTemplate, outboxCallback, dltAckHandler);
     }
 
+    // ─── Inbox 계열 (trusta.messaging.inbox.enabled=true 일 때만 활성, default false) ───
+    // InboxRepository (JPA) 가 있어야 활성. 멱등 소비가 필요한 서비스만 명시적으로 켠다.
+
     // @IdempotentConsumer AOP. message_id 헤더로 중복 소비 방지.
-    // InboxRepository (JPA) 가 있을 때만 등록.
     @Bean
+    @ConditionalOnProperty(name = "trusta.messaging.inbox.enabled", havingValue = "true")
     @ConditionalOnBean(InboxRepository.class)
     public InboxAdvice inboxAdvice(InboxRepository inboxRepository) {
         return new InboxAdvice(inboxRepository);
     }
 
-    // 매일 03:00 에 7일 이전 Inbox 삭제. 테이블 비대화 방지.
+    // 매일 03:00 (UTC) 에 7일 이전 Inbox 삭제. 테이블 비대화 방지.
     @Bean
+    @ConditionalOnProperty(name = "trusta.messaging.inbox.enabled", havingValue = "true")
     @ConditionalOnBean(InboxRepository.class)
     public InboxCleanupScheduler inboxCleanupScheduler(InboxRepository inboxRepository) {
         return new InboxCleanupScheduler(inboxRepository);
     }
 
+    // ─── Security 빈 (소비자 override 허용) ───
+
     // Gateway 의 X-User-* 헤더 → SecurityContext.
     // trust-gateway-headers 프로퍼티가 명시적으로 true 일 때만 활성 (default false, header spoofing 방지).
     // 필터 내부 예외는 handlerExceptionResolver 로 위임되어 GlobalExceptionAdvice 가 처리.
+    // 소비 서비스가 자체 LoginFilter 를 등록하면 그쪽이 우선.
     @Bean
+    @ConditionalOnMissingBean
     public LoginFilter loginFilter(
             @Qualifier("handlerExceptionResolver") HandlerExceptionResolver resolver,
             @Value("${trusta.security.trust-gateway-headers:false}") boolean trustGatewayHeaders) {
@@ -144,13 +159,16 @@ public class CommonAutoConfiguration {
     }
 
     // 401 응답 핸들러. ErrorResponse JSON 으로 응답하므로 ObjectMapper 주입.
+    // 소비 서비스가 자체 EntryPoint 를 등록하면 그쪽이 우선.
     @Bean
+    @ConditionalOnMissingBean
     public CustomAuthenticationEntryPoint customAuthenticationEntryPoint(ObjectMapper objectMapper) {
         return new CustomAuthenticationEntryPoint(objectMapper);
     }
 
-    // 403 응답 핸들러.
+    // 403 응답 핸들러. 소비 서비스가 자체 AccessDeniedHandler 를 등록하면 그쪽이 우선.
     @Bean
+    @ConditionalOnMissingBean
     public CustomAccessDeniedHandler customAccessDeniedHandler(ObjectMapper objectMapper) {
         return new CustomAccessDeniedHandler(objectMapper);
     }
