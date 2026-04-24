@@ -1,37 +1,25 @@
 package com.trustamarket.common.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.trustamarket.common.config.feign.FeignConfig;
-import com.trustamarket.common.config.security.SecurityConfig;
-import com.trustamarket.common.config.web.WebConfig;
-import com.trustamarket.common.domain.inbox.InboxRepository;
-import com.trustamarket.common.domain.outbox.OutboxRepository;
-import com.trustamarket.common.event.Events;
-import com.trustamarket.common.event.OutboxCallback;
-import com.trustamarket.common.event.OutboxDltAckHandler;
-import com.trustamarket.common.event.OutboxEventListener;
-import com.trustamarket.common.event.OutboxRelayScheduler;
-import com.trustamarket.common.exception.GlobalExceptionAdvice;
 import com.trustamarket.common.config.security.CustomAccessDeniedHandler;
 import com.trustamarket.common.config.security.CustomAuthenticationEntryPoint;
 import com.trustamarket.common.config.security.LoginFilter;
+import com.trustamarket.common.config.security.SecurityConfig;
+import com.trustamarket.common.config.web.WebConfig;
+import com.trustamarket.common.event.Events;
+import com.trustamarket.common.exception.GlobalExceptionAdvice;
 import com.trustamarket.common.filter.MdcLoggingFilter;
-import com.trustamarket.common.messaging.InboxAdvice;
-import com.trustamarket.common.messaging.InboxCleanupScheduler;
 import com.trustamarket.common.response.CommonResponseAdvice;
-import com.trustamarket.common.util.JsonUtil;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.ApplicationEventPublisher;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.Ordered;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.web.servlet.HandlerExceptionResolver;
 
 // Trusta common 의 Spring Boot 자동 설정 진입점.
@@ -57,7 +45,7 @@ public class CommonAutoConfiguration {
         return new GlobalExceptionAdvice();
     }
 
-    // 컨트롤러 반환값을 CommonResponse / PagedResponse 로 자동 래핑.
+    // 컨트롤러 반환값을 CommonResponse / PagedResponse / SlicedResponse 로 자동 래핑.
     // 소비 서비스가 자체 advice 를 등록하면 그쪽이 우선.
     @Bean
     @ConditionalOnMissingBean
@@ -74,74 +62,11 @@ public class CommonAutoConfiguration {
         return registration;
     }
 
-    // Events.trigger(OutboxEvent) 의 내부 헬퍼. Spring 이벤트를 통해 Outbox 리스너로 넘긴다.
+    // Events.trigger(OutboxEvent) 의 정적 게이트웨이. 도메인이 주입 없이 ApplicationEvent 를 발행하도록 돕는 얇은 헬퍼.
+    // 실제 이벤트 수신/Kafka 발행/상태 전이 등 인프라 로직은 common 이 아닌 각 도메인 서비스에서 구현한다.
     @Bean
     public Events events(ApplicationEventPublisher publisher) {
         return new Events(publisher);
-    }
-
-    // ─── Outbox 계열 (trusta.messaging.outbox.enabled=true 일 때만 활성, default false) ───
-    // Kafka + JPA 의존성도 있어야 활성 (@ConditionalOnBean). 프로젝트에서 Outbox 패턴을 실제 쓰는 서비스만 명시적으로 켠다.
-
-    // DLT ack 성공 시 DLT_SENT 전이 전담 — async 콜백의 self-invocation 문제 우회 위해 별도 빈.
-    @Bean
-    @ConditionalOnProperty(name = "trusta.messaging.outbox.enabled", havingValue = "true")
-    @ConditionalOnBean({KafkaTemplate.class, OutboxRepository.class})
-    public OutboxDltAckHandler outboxDltAckHandler(OutboxRepository outboxRepository) {
-        return new OutboxDltAckHandler(outboxRepository);
-    }
-
-    // Kafka 발행 성공/실패 콜백 — PROCESSED/FAILED/DLT_PENDING 상태 전이 + DLT 전송.
-    // REQUIRES_NEW 트랜잭션이라 호출자 롤백에 영향받지 않는다.
-    @Bean
-    @ConditionalOnProperty(name = "trusta.messaging.outbox.enabled", havingValue = "true")
-    @ConditionalOnBean({KafkaTemplate.class, OutboxRepository.class})
-    public OutboxCallback outboxCallback(OutboxRepository outboxRepository,
-                                         KafkaTemplate<String, String> kafkaTemplate,
-                                         OutboxDltAckHandler dltAckHandler) {
-        return new OutboxCallback(outboxRepository, kafkaTemplate, dltAckHandler);
-    }
-
-    // OutboxEvent 수신 → Outbox 테이블 PENDING 저장 → 트랜잭션 커밋 후 Kafka 발행.
-    @Bean
-    @ConditionalOnProperty(name = "trusta.messaging.outbox.enabled", havingValue = "true")
-    @ConditionalOnBean({KafkaTemplate.class, OutboxRepository.class})
-    public OutboxEventListener outboxEventListener(OutboxRepository outboxRepository,
-                                                   KafkaTemplate<String, String> kafkaTemplate,
-                                                   JsonUtil jsonUtil,
-                                                   OutboxCallback outboxCallback) {
-        return new OutboxEventListener(outboxRepository, kafkaTemplate, jsonUtil, outboxCallback);
-    }
-
-    // 10초 주기로 PENDING/FAILED 는 원 토픽, DLT_PENDING 은 DLT 토픽으로 재발행.
-    // 상태 전이는 OutboxCallback / OutboxDltAckHandler 에 위임해 REQUIRES_NEW 로 격리.
-    @Bean
-    @ConditionalOnProperty(name = "trusta.messaging.outbox.enabled", havingValue = "true")
-    @ConditionalOnBean({KafkaTemplate.class, OutboxRepository.class})
-    public OutboxRelayScheduler outboxRelayScheduler(OutboxRepository outboxRepository,
-                                                     KafkaTemplate<String, String> kafkaTemplate,
-                                                     OutboxCallback outboxCallback,
-                                                     OutboxDltAckHandler dltAckHandler) {
-        return new OutboxRelayScheduler(outboxRepository, kafkaTemplate, outboxCallback, dltAckHandler);
-    }
-
-    // ─── Inbox 계열 (trusta.messaging.inbox.enabled=true 일 때만 활성, default false) ───
-    // InboxRepository (JPA) 가 있어야 활성. 멱등 소비가 필요한 서비스만 명시적으로 켠다.
-
-    // @IdempotentConsumer AOP. message_id 헤더로 중복 소비 방지.
-    @Bean
-    @ConditionalOnProperty(name = "trusta.messaging.inbox.enabled", havingValue = "true")
-    @ConditionalOnBean(InboxRepository.class)
-    public InboxAdvice inboxAdvice(InboxRepository inboxRepository) {
-        return new InboxAdvice(inboxRepository);
-    }
-
-    // 매일 03:00 (UTC) 에 7일 이전 Inbox 삭제. 테이블 비대화 방지.
-    @Bean
-    @ConditionalOnProperty(name = "trusta.messaging.inbox.enabled", havingValue = "true")
-    @ConditionalOnBean(InboxRepository.class)
-    public InboxCleanupScheduler inboxCleanupScheduler(InboxRepository inboxRepository) {
-        return new InboxCleanupScheduler(inboxRepository);
     }
 
     // ─── Security 빈 (소비자 override 허용) ───
