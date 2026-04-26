@@ -611,9 +611,9 @@ product.isDeleted();
 
 | 필드 | 타입 | 설명 |
 |---|---|---|
-| `createdAt` | `LocalDateTime` | 생성 시각 (자동, 수정 불가). `BaseCreatedEntity` 에서 상속 |
-| `updatedAt` | `LocalDateTime` | 수정 시각 (자동). `BaseTimeEntity` 에서 상속 |
-| `deletedAt` | `LocalDateTime` | 삭제 시각 (null 이면 미삭제) |
+| `createdAt` | `Instant` | 생성 시각 (UTC, 자동, 수정 불가). `BaseCreatedEntity` 에서 상속. PostgreSQL `TIMESTAMPTZ` 와 매핑 |
+| `updatedAt` | `Instant` | 수정 시각 (UTC, 자동). `BaseTimeEntity` 에서 상속 |
+| `deletedAt` | `Instant` | 삭제 시각 (UTC, null 이면 미삭제) |
 
 ### `BaseUserEntity` — 유저 감사 확장
 
