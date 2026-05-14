@@ -34,7 +34,9 @@ public class SecurityConfig {
                 // deny by default — actuator health/info 외 모든 요청은 인증 필수.
                 // 소비 서비스의 public 엔드포인트(/signup, /login 등)는 각자 SecurityConfig 에서 override.
                 .authorizeHttpRequests(authorize -> authorize
-                        .requestMatchers("/actuator/health", "/actuator/info").permitAll()
+                        // K8s probe (liveness/readiness) 와 Prometheus scrape 가 인증 없이 접근.
+                        // /actuator/health/** 와일드카드로 /actuator/health/liveness, /readiness 등 포함.
+                        .requestMatchers("/actuator/health/**", "/actuator/health", "/actuator/info", "/actuator/prometheus").permitAll()
                         .anyRequest().authenticated()
                 )
                 .exceptionHandling(c -> {

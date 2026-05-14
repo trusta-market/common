@@ -3,7 +3,7 @@
 Trusta MSA 프로젝트의 **공통 라이브러리**. 모든 도메인 서비스에서 의존성으로 추가해 사용한다.
 
 - **패키지 베이스**: `com.trustamarket.common`
-- **Artifact**: `com.trustamarket:common:0.0.1-SNAPSHOT`
+- **Artifact**: `com.trustamarket:common:0.1.0-SNAPSHOT`
 - **배포**: GitHub Packages (`trusta-market/common`)
 - **Java**: 21 / **Spring Boot**: 3.5.13 / **Spring Cloud**: 2025.0.1
 
@@ -309,7 +309,7 @@ repositories {
 }
 
 dependencies {
-    implementation 'com.trustamarket:common:0.0.1-SNAPSHOT'
+    implementation 'com.trustamarket:common:0.1.0-SNAPSHOT'
 }
 ```
 
@@ -793,8 +793,9 @@ public interface ProductClient {
 **deny by default** — `anyRequest().authenticated()` 가 기본값. 공유 모듈이 모든 소비 서비스에 안전한 기본값을 깔아둔다.
 
 예외로 permitAll:
-- `/actuator/health`
+- `/actuator/health`, `/actuator/health/**` (K8s liveness/readiness probe)
 - `/actuator/info`
+- `/actuator/prometheus` (Prometheus scrape)
 
 소비 서비스에 **public 엔드포인트**가 필요하면 자체 `SecurityFilterChain` 을 `@Bean`으로 등록해 override.
 
@@ -900,6 +901,9 @@ public class SomeService {
 - [ ] Liquibase 도입 검토 (ddl-auto → Liquibase)
 - [ ] Security Role 이름 Trusta 정책 확정 후 재검토
 - [ ] 인증 정책 확정 후 LoginFilter `trust-gateway-headers` 기본값 재검토 (HMAC 서명 방식 등)
+
+### 완료 (v0.1.0-SNAPSHOT)
+- [x] `SecurityConfig` permitAll 확장 — `/actuator/health/**` 와일드카드 + `/actuator/prometheus` (K8s probe + Prometheus scrape 호환)
 
 ### 완료 (v0.0.1-SNAPSHOT)
 - [x] `WebConfig` RestrictedPageableResolver 체인 앞 등록
