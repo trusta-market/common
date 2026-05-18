@@ -37,8 +37,6 @@ public class SecurityConfig {
                         // K8s probe (liveness/readiness) 와 Prometheus scrape 가 인증 없이 접근.
                         // /actuator/health/** 와일드카드로 /actuator/health/liveness, /readiness 등 포함.
                         .requestMatchers("/actuator/health/**", "/actuator/health", "/actuator/info", "/actuator/prometheus").permitAll()
-                        // 서비스 간 내부 호출 — Gateway를 거치지 않아 사용자 헤더 없음. 클러스터 내부에서만 접근 가능.
-                        .requestMatchers("/internal/v1/**").permitAll()
                         .anyRequest().authenticated()
                 )
                 .exceptionHandling(c -> {
