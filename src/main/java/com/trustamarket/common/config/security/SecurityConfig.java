@@ -37,6 +37,10 @@ public class SecurityConfig {
                         // K8s probe (liveness/readiness) 와 Prometheus scrape 가 인증 없이 접근.
                         // /actuator/health/** 와일드카드로 /actuator/health/liveness, /readiness 등 포함.
                         .requestMatchers("/actuator/health/**", "/actuator/health", "/actuator/info", "/actuator/prometheus").permitAll()
+                        // Swagger / OpenAPI — 외부 노출은 api-gateway 에서 ADMIN role 로 보호.
+                        // 각 서비스의 /v3/api-docs/** 는 api-gateway 가 cluster 내부에서 fetch (aggregation).
+                        // /swagger-ui/** 는 서비스 직접 접근 시 dev 디버깅 용도.
+                        .requestMatchers("/v3/api-docs/**", "/v3/api-docs.yaml", "/swagger-ui/**", "/swagger-ui.html", "/swagger-resources/**", "/webjars/**").permitAll()
                         .anyRequest().authenticated()
                 )
                 .exceptionHandling(c -> {
