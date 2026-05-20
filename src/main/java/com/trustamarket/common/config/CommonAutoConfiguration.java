@@ -33,7 +33,8 @@ import org.springframework.web.servlet.HandlerExceptionResolver;
         EventConfig.class,
         FeignConfig.class,
         WebConfig.class,
-        SecurityConfig.class
+        SecurityConfig.class,
+        SwaggerConfig.class
 })
 public class CommonAutoConfiguration {
 
